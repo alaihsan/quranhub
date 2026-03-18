@@ -1,0 +1,47 @@
+# =============================================================================
+# General / OS / IDE
+# =============================================================================
+.DS_Store
+*.log
+
+# IDEs
+.idea/
+.vscode/
+*.suo
+*.user
+
+# =============================================================================
+# Backend (Python / Flask)
+# =============================================================================
+
+# Virtual Environment
+# Mengabaikan folder virtual environment
+backend/venv/
+
+# Byte-compiled / optimized / DLL files
+backend/__pycache__/
+backend/**/*.pyc
+backend/**/*.pyo
+backend/**/*.pyd
+
+# Environment variables
+# PENTING: Jangan pernah commit file .env Anda yang berisi kredensial
+backend/.env
+
+# Flask instance folder
+backend/instance/
+
+# =============================================================================
+# Frontend (Node / Vue / Vite)
+# =============================================================================
+
+# Dependencies
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+
+# Log files
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*

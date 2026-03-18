@@ -15,17 +15,17 @@ export const useQuranStore = defineStore('quran', () => {
 
   // Settings
   const settings = ref({
-    translationId: '33', // Indonesian - Kemenag
-    tafsirId: '816',     // Tafsir Ringkas Kemenag (Indonesian)
+    translationId: '33',
+    tafsirId: '816',
     showTranslation: true,
     showTafsir: false,
     showWordByWord: false,
     showTajweed: true,
-    fontSize: 'medium',    // small, medium, large, xlarge
-    theme: 'light',        // light, dark
-    displayMode: 'surah',  // surah, page, juz
-    readingMode: 'normal', // normal, mushaf
-    mushafLineWidth: 55,   // approximate chars per mushaf line
+    fontSize: 'medium',
+    theme: 'light',
+    displayMode: 'surah',
+    readingMode: 'normal',    // normal, mushaf
+    sidebarCollapsed: false,  // show/hide sidebar on desktop
   })
 
   // Load settings from localStorage
@@ -36,11 +36,9 @@ export const useQuranStore = defineStore('quran', () => {
     } catch (e) { /* ignore */ }
   }
 
-  // Watch and save settings
   function updateSettings(newSettings) {
     Object.assign(settings.value, newSettings)
     localStorage.setItem('quran-hub-settings', JSON.stringify(settings.value))
-    // Apply theme
     document.documentElement.setAttribute('data-theme', settings.value.theme)
   }
 
@@ -54,7 +52,8 @@ export const useQuranStore = defineStore('quran', () => {
 
   const arabicFontSize = computed(() => fontSizeMap.value[settings.value.fontSize] || '1.75rem')
 
-  // Actions
+  // ── Actions ──
+
   async function fetchChapters() {
     if (chapters.value.length > 0) return
     loading.value = true
@@ -73,7 +72,7 @@ export const useQuranStore = defineStore('quran', () => {
   /**
    * @param {number} chapterId
    * @param {number} page
-   * @param {boolean} forceWords - Force loading word-by-word data (for mushaf mode)
+   * @param {boolean} forceWords - Force word-by-word data (for mushaf mode)
    */
   async function fetchVersesByChapter(chapterId, page = 1, forceWords = false) {
     loading.value = true
@@ -90,7 +89,6 @@ export const useQuranStore = defineStore('quran', () => {
         per_page: 50,
         page
       }
-      // Include word_fields when we need words
       if (needWords) {
         params.word_fields = 'text_uthmani,text_indopak,code_v1,code_v2,v1_page,v2_page,line_number'
       }
@@ -151,7 +149,7 @@ export const useQuranStore = defineStore('quran', () => {
     }
   }
 
-  // Bookmarks
+  // ── Bookmarks ──
   const bookmarks = ref(JSON.parse(localStorage.getItem('quran-hub-bookmarks') || '[]'))
 
   function addBookmark(verseKey, surahName) {
@@ -169,11 +167,20 @@ export const useQuranStore = defineStore('quran', () => {
     return bookmarks.value.some(b => b.verseKey === verseKey)
   }
 
-  // Last read
+  // ── Last Read ──
   const lastRead = ref(JSON.parse(localStorage.getItem('quran-hub-lastread') || 'null'))
 
   function setLastRead(data) {
-    lastRead.value = { ...data, timestamp: Date.now() }
+    // Always resolve surah name from chapters if possible
+    const chId = Number(data.chapterId)
+    const ch = chapters.value.find(c => c.id === chId)
+    lastRead.value = {
+      chapterId: data.chapterId,
+      verseNumber: data.verseNumber,
+      surahName: ch?.name_simple || data.surahName,
+      verseKey: data.verseKey,
+      timestamp: Date.now()
+    }
     localStorage.setItem('quran-hub-lastread', JSON.stringify(lastRead.value))
   }
 

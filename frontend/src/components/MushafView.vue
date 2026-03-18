@@ -12,58 +12,7 @@ const props = defineProps({
 const store = useQuranStore()
 
 /**
- * Build mushaf lines from verses.
- * Each verse's words are laid out RTL, flowing line by line.
- * We group words into lines based on approximate character width.
- */
-const mushafLines = computed(() => {
-  const lines = []
-  let currentLine = []
-  let currentLineWidth = 0
-  const MAX_LINE_CHARS = store.settings.mushafLineWidth || 55 // approximate chars per line
-
-  for (const verse of props.verses) {
-    if (!verse.words) continue
-
-    for (const word of verse.words) {
-      const wordText = word.text_uthmani || word.text_indopak || ''
-      const wordLen = wordText.length + 1 // +1 for space
-
-      // If adding this word exceeds line width, start new line
-      if (currentLine.length > 0 && currentLineWidth + wordLen > MAX_LINE_CHARS) {
-        lines.push([...currentLine])
-        currentLine = []
-        currentLineWidth = 0
-      }
-
-      currentLine.push({
-        id: word.id,
-        text: wordText,
-        charType: word.char_type_name,
-        verseKey: verse.verse_key,
-        verseNumber: verse.verse_key?.split(':')[1],
-        isEnd: word.char_type_name === 'end',
-        transliteration: word.transliteration?.text,
-        translation: word.translation?.text,
-        code_v1: word.code_v1,
-        code_v2: word.code_v2,
-        lineNumber: word.line_number,
-        pageNumber: word.v1_page || word.v2_page,
-      })
-      currentLineWidth += wordLen
-    }
-  }
-
-  // Push remaining words
-  if (currentLine.length > 0) {
-    lines.push(currentLine)
-  }
-
-  return lines
-})
-
-/**
- * Alternative: group by actual page/line data from API
+ * Group by actual page/line data from API (mushaf positioning)
  */
 const mushafPageLines = computed(() => {
   const pageMap = new Map()
@@ -86,8 +35,6 @@ const mushafPageLines = computed(() => {
         verseKey: verse.verse_key,
         verseNumber: verse.verse_key?.split(':')[1],
         isEnd: word.char_type_name === 'end',
-        code_v1: word.code_v1,
-        code_v2: word.code_v2,
       })
     }
   }
@@ -95,44 +42,70 @@ const mushafPageLines = computed(() => {
   return Array.from(pageMap.values())
 })
 
-// Use API line data if available, otherwise fallback to computed lines
+/**
+ * Fallback: build lines from character width estimation
+ */
+const mushafFallbackLines = computed(() => {
+  const lines = []
+  let currentLine = []
+  let currentLineWidth = 0
+  const MAX = 55
+
+  for (const verse of props.verses) {
+    if (!verse.words) continue
+    for (const word of verse.words) {
+      const wordText = word.text_uthmani || word.text_indopak || ''
+      const wordLen = wordText.length + 1
+
+      if (currentLine.length > 0 && currentLineWidth + wordLen > MAX) {
+        lines.push({ page: 0, line: lines.length + 1, words: [...currentLine] })
+        currentLine = []
+        currentLineWidth = 0
+      }
+
+      currentLine.push({
+        id: word.id,
+        text: wordText,
+        charType: word.char_type_name,
+        verseKey: verse.verse_key,
+        verseNumber: verse.verse_key?.split(':')[1],
+        isEnd: word.char_type_name === 'end',
+      })
+      currentLineWidth += wordLen
+    }
+  }
+  if (currentLine.length > 0) {
+    lines.push({ page: 0, line: lines.length + 1, words: currentLine })
+  }
+  return lines
+})
+
 const displayLines = computed(() => {
   const hasLineData = props.verses.some(v =>
     v.words?.some(w => w.line_number != null)
   )
-
-  if (hasLineData && store.settings.mushafUseApiLines !== false) {
-    return mushafPageLines.value
-  }
-
-  // Fallback: wrap computed lines into the same shape
-  return mushafLines.value.map((words, idx) => ({
-    page: 0,
-    line: idx + 1,
-    words
-  }))
+  return hasLineData ? mushafPageLines.value : mushafFallbackLines.value
 })
 
-// Group lines by page number
+// Group lines by page
 const pages = computed(() => {
-  const pageGroups = new Map()
+  const groups = new Map()
   for (const lineData of displayLines.value) {
-    const pageNum = lineData.page || 0
-    if (!pageGroups.has(pageNum)) {
-      pageGroups.set(pageNum, [])
-    }
-    pageGroups.get(pageNum).push(lineData)
+    const p = lineData.page || 0
+    if (!groups.has(p)) groups.set(p, [])
+    groups.get(p).push(lineData)
   }
-  return Array.from(pageGroups.entries()).map(([num, lines]) => ({ number: num, lines }))
+  return Array.from(groups.entries()).map(([num, lines]) => ({ number: num, lines }))
 })
 
 function saveAsLastRead(verseKey) {
   if (!verseKey) return
   const [chId, vNum] = verseKey.split(':')
+  const ch = store.chapters.find(c => c.id === Number(chId))
   store.setLastRead({
     chapterId: chId,
     verseNumber: vNum,
-    surahName: props.surahName,
+    surahName: ch?.name_simple || props.surahName,
     verseKey
   })
 }
@@ -146,13 +119,9 @@ function saveAsLastRead(verseKey) {
     </div>
 
     <!-- Mushaf Pages -->
-    <div
-      v-for="(page, pageIdx) in pages"
-      :key="pageIdx"
-      class="mushaf-page"
-    >
+    <div v-for="(page, pageIdx) in pages" :key="pageIdx" class="mushaf-page">
       <div v-if="page.number > 0" class="mushaf-page-number">
-        {{ page.number }}
+        صفحة {{ page.number }}
       </div>
 
       <div class="mushaf-page-content">
@@ -160,25 +129,25 @@ function saveAsLastRead(verseKey) {
           v-for="(lineData, lineIdx) in page.lines"
           :key="`${pageIdx}-${lineIdx}`"
           class="mushaf-line"
-          :class="{ 'mushaf-line-first': lineIdx === 0, 'mushaf-line-last': lineIdx === page.lines.length - 1 }"
+          :class="{
+            'mushaf-line-last': lineIdx === page.lines.length - 1
+          }"
         >
-          <span
-            v-for="word in lineData.words"
-            :key="word.id"
-            class="mushaf-word"
-            :class="{
-              'mushaf-word-end': word.isEnd,
-              'mushaf-word-verse': word.charType === 'word'
-            }"
-            :data-verse="word.verseKey"
-            :title="word.isEnd ? `Ayat ${word.verseNumber}` : ''"
-            @click="saveAsLastRead(word.verseKey)"
-          >
-            <span v-if="word.isEnd" class="verse-end-marker">
-              {{ word.text }}
-            </span>
-            <span v-else class="word-text">{{ word.text }}</span>
-          </span>
+          <!-- Render all words as continuous flowing Arabic text -->
+          <template v-for="word in lineData.words" :key="word.id">
+            <span
+              v-if="word.isEnd"
+              class="verse-end-marker"
+              :title="`Ayat ${word.verseNumber}`"
+              @click="saveAsLastRead(word.verseKey)"
+            >{{ word.text }}</span>
+            <span
+              v-else
+              class="mushaf-word"
+              :data-verse="word.verseKey"
+              @click="saveAsLastRead(word.verseKey)"
+            >{{ word.text }}</span>
+          </template>
         </div>
       </div>
     </div>
@@ -193,12 +162,12 @@ function saveAsLastRead(verseKey) {
 
 <style scoped>
 .mushaf-container {
-  max-width: 800px;
+  max-width: 780px;
   margin: 0 auto;
   padding: var(--space-lg) var(--space-md);
 }
 
-/* Bismillah */
+/* ── Bismillah ── */
 .mushaf-bismillah {
   text-align: center;
   font-family: var(--font-arabic-quran);
@@ -208,15 +177,11 @@ function saveAsLastRead(verseKey) {
   direction: rtl;
   border-bottom: 2px solid var(--color-gold);
   margin-bottom: var(--space-xl);
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--color-gold) 4%, transparent),
-    transparent
-  );
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--color-gold) 4%, transparent), transparent);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
-/* Page */
+/* ── Page Frame ── */
 .mushaf-page {
   position: relative;
   margin-bottom: var(--space-xl);
@@ -230,112 +195,12 @@ function saveAsLastRead(verseKey) {
 .mushaf-page::before {
   content: '';
   position: absolute;
-  top: 8px;
-  left: 8px;
-  right: 8px;
-  bottom: 8px;
+  top: 8px; left: 8px; right: 8px; bottom: 8px;
   border: 1px solid var(--color-border-gold);
   border-radius: var(--radius-md);
   pointer-events: none;
 }
 
-.mushaf-page-number {
-  text-align: center;
-  font-size: 0.75rem;
-  color: var(--color-text-muted);
-  margin-bottom: var(--space-md);
-  font-weight: 500;
-  letter-spacing: 0.05em;
-}
-
-.mushaf-page-content {
-  padding: var(--space-sm) var(--space-md);
-}
-
-/* Line */
-.mushaf-line {
-  display: flex;
-  flex-wrap: nowrap;
-  direction: rtl;
-  justify-content: center;
-  align-items: baseline;
-  padding: var(--space-xs) 0;
-  min-height: 3.2em;
-  border-bottom: 1px solid transparent;
-  transition: border-color var(--transition-fast);
-  line-height: 2.8;
-}
-
-.mushaf-line:not(.mushaf-line-last) {
-  border-bottom-color: color-mix(in srgb, var(--color-border-light) 50%, transparent);
-}
-
-/* Justify lines - stretch words to fill width like a real mushaf */
-.mushaf-line {
-  justify-content: space-between;
-}
-
-/* Last line may not be full, so center it */
-.mushaf-line-last {
-  justify-content: center;
-  gap: 0.3em;
-}
-
-/* Word */
-.mushaf-word {
-  font-family: var(--font-arabic-quran);
-  font-size: v-bind('store.arabicFontSize');
-  color: var(--color-text-arabic);
-  cursor: default;
-  padding: 0 0.12em;
-  border-radius: 4px;
-  transition: background var(--transition-fast);
-  white-space: nowrap;
-  user-select: text;
-}
-
-.mushaf-word:hover {
-  background: color-mix(in srgb, var(--color-gold) 10%, transparent);
-}
-
-.mushaf-word-verse {
-  cursor: pointer;
-}
-
-/* Verse end marker */
-.verse-end-marker {
-  font-family: var(--font-arabic-quran);
-  font-size: 0.85em;
-  color: var(--color-gold-dark);
-  padding: 0 0.15em;
-  display: inline-block;
-}
-
-[data-theme="dark"] .verse-end-marker {
-  color: var(--color-gold);
-}
-
-/* Empty state */
-.mushaf-empty {
-  text-align: center;
-  padding: var(--space-3xl);
-  color: var(--color-text-muted);
-}
-
-.mushaf-empty-hint {
-  font-size: 0.85rem;
-  margin-top: var(--space-sm);
-  opacity: 0.7;
-}
-
-/* ==========================================
-   Ornamental frame decorations
-   ========================================== */
-.mushaf-page {
-  position: relative;
-}
-
-/* Corner ornaments */
 .mushaf-page::after {
   content: '❊';
   position: absolute;
@@ -349,48 +214,94 @@ function saveAsLastRead(verseKey) {
   opacity: 0.5;
 }
 
-/* ==========================================
-   Responsive
-   ========================================== */
+.mushaf-page-number {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--color-gold-dark);
+  margin-bottom: var(--space-md);
+  font-family: var(--font-arabic);
+  direction: rtl;
+}
+
+.mushaf-page-content {
+  padding: var(--space-xs) var(--space-sm);
+}
+
+/* ── Line — the key: continuous text, no word gaps ── */
+.mushaf-line {
+  direction: rtl;
+  text-align: justify;
+  text-align-last: justify; /* force justify on every line */
+  font-family: var(--font-arabic-quran);
+  font-size: v-bind('store.arabicFontSize');
+  color: var(--color-text-arabic);
+  line-height: 2.6;
+  min-height: 2em;
+  padding: 2px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border-light) 40%, transparent);
+  /* Continuous text — no flex, no gaps, just inline flow */
+  word-spacing: 0;
+  letter-spacing: 0;
+}
+
+/* Last line of a page: center, don't force justify */
+.mushaf-line-last {
+  text-align-last: center;
+}
+
+.mushaf-line:last-child {
+  border-bottom: none;
+}
+
+/* ── Word — inline, no padding, no gaps ── */
+.mushaf-word {
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.15s ease;
+  /* no padding, no margin — text flows naturally like real mushaf */
+}
+
+.mushaf-word:hover {
+  background: color-mix(in srgb, var(--color-gold) 12%, transparent);
+}
+
+/* ── Verse End Marker ── */
+.verse-end-marker {
+  display: inline;
+  font-size: 0.8em;
+  color: var(--color-gold-dark);
+  cursor: pointer;
+  padding: 0 0.05em;
+  vertical-align: baseline;
+}
+
+[data-theme="dark"] .verse-end-marker {
+  color: var(--color-gold);
+}
+
+/* ── Empty ── */
+.mushaf-empty {
+  text-align: center;
+  padding: var(--space-3xl);
+  color: var(--color-text-muted);
+}
+.mushaf-empty-hint {
+  font-size: 0.85rem;
+  margin-top: var(--space-sm);
+  opacity: 0.7;
+}
+
+/* ── Responsive ── */
 @media (max-width: 768px) {
-  .mushaf-container {
-    padding: var(--space-sm);
-  }
-
-  .mushaf-page {
-    padding: var(--space-md) var(--space-sm);
-    border-radius: var(--radius-md);
-  }
-
-  .mushaf-page::before {
-    top: 4px;
-    left: 4px;
-    right: 4px;
-    bottom: 4px;
-  }
-
-  .mushaf-word {
-    padding: 0 0.06em;
-  }
-
-  .mushaf-line {
-    line-height: 2.4;
-    min-height: 2.8em;
-  }
-
-  .mushaf-bismillah {
-    font-size: 1.5rem;
-    padding: var(--space-lg) var(--space-md);
-  }
+  .mushaf-container { padding: var(--space-sm); }
+  .mushaf-page { padding: var(--space-md) var(--space-sm); border-radius: var(--radius-md); }
+  .mushaf-page::before { top: 4px; left: 4px; right: 4px; bottom: 4px; }
+  .mushaf-line { line-height: 2.3; }
+  .mushaf-bismillah { font-size: 1.5rem; padding: var(--space-lg) var(--space-md); }
 }
 
 @media (max-width: 480px) {
-  .mushaf-page-content {
-    padding: var(--space-xs);
-  }
-
-  .mushaf-line {
-    line-height: 2.2;
-  }
+  .mushaf-page-content { padding: 0 var(--space-xs); }
+  .mushaf-line { line-height: 2.1; }
 }
 </style>

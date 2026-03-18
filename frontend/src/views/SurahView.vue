@@ -15,13 +15,10 @@ const chapterId = computed(() => Number(route.params.id))
 const surahName = computed(() => currentChapter.value?.name_simple || '')
 const showBismillah = computed(() => currentChapter.value?.bismillah_pre !== false && chapterId.value !== 1 && chapterId.value !== 9)
 
-// Reading mode: 'normal' or 'mushaf'
 const readingMode = computed(() => store.settings.readingMode || 'normal')
 
 function setReadingMode(mode) {
   store.updateSettings({ readingMode: mode })
-
-  // Mushaf mode needs word-by-word data, reload if switching to mushaf
   if (mode === 'mushaf') {
     reloadWithWords()
   }
@@ -91,34 +88,25 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Reading Mode Toggle Bar -->
+    <!-- Reading Mode Toggle -->
     <div class="reading-mode-bar">
       <div class="mode-toggle">
-        <button
-          :class="['mode-btn', { active: readingMode === 'normal' }]"
-          @click="setReadingMode('normal')"
-        >
+        <button :class="['mode-btn', { active: readingMode === 'normal' }]" @click="setReadingMode('normal')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <line x1="3" y1="6" x2="21" y2="6"/>
-            <line x1="3" y1="12" x2="21" y2="12"/>
-            <line x1="3" y1="18" x2="21" y2="18"/>
+            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
           </svg>
           <span>Per Ayat</span>
         </button>
-        <button
-          :class="['mode-btn', { active: readingMode === 'mushaf' }]"
-          @click="setReadingMode('mushaf')"
-        >
+        <button :class="['mode-btn', { active: readingMode === 'mushaf' }]" @click="setReadingMode('mushaf')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
-            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
           </svg>
           <span>Mushaf</span>
         </button>
       </div>
     </div>
 
-    <!-- Bismillah (only in normal mode, mushaf handles its own) -->
+    <!-- Bismillah (normal mode only) -->
     <div v-if="readingMode === 'normal' && showBismillah" class="bismillah" translate="no">
       بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ
     </div>
@@ -137,11 +125,8 @@ onUnmounted(() => {
         :chapter-id="chapterId"
         :show-bismillah="showBismillah"
       />
-
       <div v-if="store.pagination?.next_page" class="load-more">
-        <button v-if="!loadingMore" class="btn-load-more" @click="loadMore">
-          Muat lebih banyak ayat
-        </button>
+        <button v-if="!loadingMore" class="btn-load-more" @click="loadMore">Muat lebih banyak ayat</button>
         <div v-else class="loading-spinner" style="width:24px;height:24px;border-width:2px"></div>
       </div>
     </template>
@@ -155,11 +140,8 @@ onUnmounted(() => {
           :verse="verse"
           :surah-name="surahName"
         />
-
         <div v-if="store.pagination?.next_page" class="load-more">
-          <button v-if="!loadingMore" class="btn-load-more" @click="loadMore">
-            Muat lebih banyak ayat
-          </button>
+          <button v-if="!loadingMore" class="btn-load-more" @click="loadMore">Muat lebih banyak ayat</button>
           <div v-else class="loading-spinner" style="width:24px;height:24px;border-width:2px"></div>
         </div>
       </div>
@@ -180,9 +162,7 @@ onUnmounted(() => {
 }
 
 .surah-header-bg {
-  position: absolute;
-  inset: 0;
-  opacity: 0.05;
+  position: absolute; inset: 0; opacity: 0.05;
   background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' stroke='%23fff' stroke-width='0.5'%3E%3Ccircle cx='30' cy='30' r='20'/%3E%3Ccircle cx='30' cy='30' r='10'/%3E%3C/g%3E%3C/svg%3E");
 }
 
@@ -190,29 +170,16 @@ onUnmounted(() => {
 .surah-title-arabic { font-family: var(--font-arabic-quran); font-size: 2.5rem; font-weight: 400; margin: var(--space-md) 0 var(--space-xs); direction: rtl; }
 .surah-title-latin { font-size: 1.3rem; font-weight: 600; margin-bottom: var(--space-xs); }
 .surah-meaning { font-size: 0.9rem; opacity: 0.8; }
-
 .surah-info-pills { display: flex; gap: var(--space-sm); justify-content: center; margin-top: var(--space-md); flex-wrap: wrap; }
-.pill {
-  padding: 4px 14px;
-  background: rgba(255,255,255,0.15);
-  border-radius: 99px;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
+.pill { padding: 4px 14px; background: rgba(255,255,255,0.15); border-radius: 99px; font-size: 0.75rem; font-weight: 500; }
 
-/* =============================================
-   Reading Mode Toggle Bar
-   ============================================= */
+/* ── Reading Mode Toggle ── */
 .reading-mode-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   padding: var(--space-sm) var(--space-lg);
   background: var(--color-bg-card);
   border-bottom: 1px solid var(--color-border-light);
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  position: sticky; top: 0; z-index: 10;
 }
 
 .mode-toggle {
@@ -220,82 +187,39 @@ onUnmounted(() => {
   background: var(--color-parchment);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
-  padding: 3px;
-  gap: 3px;
+  padding: 3px; gap: 3px;
 }
 
 .mode-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
-  border: none;
-  background: none;
-  font-family: var(--font-body);
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 16px; border: none; background: none;
+  font-family: var(--font-body); font-size: 0.8rem; font-weight: 500;
+  color: var(--color-text-muted); cursor: pointer;
+  border-radius: var(--radius-md); transition: all var(--transition-fast);
   white-space: nowrap;
 }
+.mode-btn:hover { color: var(--color-text); }
+.mode-btn.active { background: var(--color-bg-card); color: var(--color-primary); box-shadow: var(--shadow-sm); font-weight: 600; }
 
-.mode-btn:hover {
-  color: var(--color-text);
-}
-
-.mode-btn.active {
-  background: var(--color-bg-card);
-  color: var(--color-primary);
-  box-shadow: var(--shadow-sm);
-  font-weight: 600;
-}
-
-/* =============================================
-   Bismillah & Others
-   ============================================= */
+/* ── Others ── */
 .bismillah {
-  text-align: center;
-  font-family: var(--font-arabic-quran);
-  font-size: 2rem;
-  color: var(--color-text-arabic);
-  padding: var(--space-xl) var(--space-lg);
-  direction: rtl;
-  border-bottom: 1px solid var(--color-border-light);
+  text-align: center; font-family: var(--font-arabic-quran); font-size: 2rem;
+  color: var(--color-text-arabic); padding: var(--space-xl) var(--space-lg);
+  direction: rtl; border-bottom: 1px solid var(--color-border-light);
   background: linear-gradient(to bottom, color-mix(in srgb, var(--color-gold) 4%, transparent), transparent);
 }
 
-.loading-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-3xl);
-}
-
+.loading-center { display: flex; flex-direction: column; align-items: center; gap: var(--space-md); padding: var(--space-3xl); }
 .loading-text { color: var(--color-text-muted); font-size: 0.9rem; }
 
-.load-more {
-  display: flex;
-  justify-content: center;
-  padding: var(--space-xl);
-}
-
+.load-more { display: flex; justify-content: center; padding: var(--space-xl); }
 .btn-load-more {
   padding: var(--space-sm) var(--space-xl);
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  font-family: var(--font-body);
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--color-primary);
-  cursor: pointer;
-  transition: all var(--transition-fast);
+  background: var(--color-bg-card); border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg); font-family: var(--font-body);
+  font-size: 0.85rem; font-weight: 500; color: var(--color-primary);
+  cursor: pointer; transition: all var(--transition-fast);
 }
-
 .btn-load-more:hover { border-color: var(--color-primary); box-shadow: var(--shadow-sm); }
 
 @media (max-width: 768px) {

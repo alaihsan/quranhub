@@ -24,6 +24,8 @@ export const useQuranStore = defineStore('quran', () => {
     fontSize: 'medium',    // small, medium, large, xlarge
     theme: 'light',        // light, dark
     displayMode: 'surah',  // surah, page, juz
+    readingMode: 'normal', // normal, mushaf
+    mushafLineWidth: 55,   // approximate chars per mushaf line
   })
 
   // Load settings from localStorage
@@ -68,19 +70,29 @@ export const useQuranStore = defineStore('quran', () => {
     }
   }
 
-  async function fetchVersesByChapter(chapterId, page = 1) {
+  /**
+   * @param {number} chapterId
+   * @param {number} page
+   * @param {boolean} forceWords - Force loading word-by-word data (for mushaf mode)
+   */
+  async function fetchVersesByChapter(chapterId, page = 1, forceWords = false) {
     loading.value = true
     error.value = null
     try {
+      const needWords = settings.value.showWordByWord || forceWords || settings.value.readingMode === 'mushaf'
       const params = {
         language: 'id',
-        words: settings.value.showWordByWord ? 'true' : 'false',
+        words: needWords ? 'true' : 'false',
         translations: settings.value.translationId,
         fields: settings.value.showTajweed
           ? 'text_uthmani,text_uthmani_tajweed'
           : 'text_uthmani',
         per_page: 50,
         page
+      }
+      // Include word_fields when we need words
+      if (needWords) {
+        params.word_fields = 'text_uthmani,text_indopak,code_v1,code_v2,v1_page,v2_page,line_number'
       }
       if (settings.value.showTafsir && settings.value.tafsirId) {
         params.tafsirs = settings.value.tafsirId
@@ -111,6 +123,7 @@ export const useQuranStore = defineStore('quran', () => {
         fields: settings.value.showTajweed
           ? 'text_uthmani,text_uthmani_tajweed'
           : 'text_uthmani',
+        word_fields: 'text_uthmani,text_indopak,code_v1,code_v2,v1_page,v2_page,line_number',
         per_page: 50
       }
       if (settings.value.showTafsir && settings.value.tafsirId) {

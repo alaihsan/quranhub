@@ -8,7 +8,6 @@ import threading
 import requests
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from functools import lru_cache
 import json
 import hashlib
 
@@ -18,9 +17,9 @@ CORS(app, origins=["http://localhost:5173", "http://localhost:3000", "http://127
 # =============================================================================
 # Configuration
 # =============================================================================
-QF_CLIENT_ID = os.getenv("QF_CLIENT_ID", "")
-QF_CLIENT_SECRET = os.getenv("QF_CLIENT_SECRET", "")
-QF_ENV = os.getenv("QF_ENV", "production")
+QF_CLIENT_ID = os.getenv("QF_CLIENT_ID", "9c369946-fb66-4e26-8fbb-586e6eea7843")
+QF_CLIENT_SECRET = os.getenv("QF_CLIENT_SECRET", "zMcGHOyuCX8NAakDv1RE9obTQV")
+QF_ENV = os.getenv("QF_ENV", "prelive")
 
 ENV_CONFIG = {
     "prelive": {
@@ -57,33 +56,36 @@ def get_access_token():
             return _token_cache["token"]
 
         config = ENV_CONFIG[QF_ENV]
+        print(f"   🔑 Requesting token from {config['auth_base_url']}...")
         response = requests.post(
             f"{config['auth_base_url']}/oauth2/token",
             auth=(QF_CLIENT_ID, QF_CLIENT_SECRET),
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             data="grant_type=client_credentials&scope=content",
-            timeout=10,
+            timeout=15,
         )
         response.raise_for_status()
         data = response.json()
 
         _token_cache["token"] = data["access_token"]
-        _token_cache["expires_at"] = time.time() + data["expires_in"]
+        _token_cache["expires_at"] = time.time() + data.get("expires_in", 3600)
+        print(f"   ✅ Token obtained (expires in {data.get('expires_in', 3600)}s)")
         return _token_cache["token"]
 
 
 # =============================================================================
 # API Client
 # =============================================================================
-# Simple in-memory cache
 _api_cache = {}
 _cache_lock = threading.Lock()
-CACHE_TTL = 3600  # 1 hour
+CACHE_TTL = 1800  # 30 minutes
 
 
 def call_quran_api(endpoint, params=None):
-    """Call Quran API with caching"""
-    cache_key = hashlib.md5(f"{endpoint}:{json.dumps(params or {}, sort_keys=True)}".encode()).hexdigest()
+    """Call Quran API with caching and 401 retry"""
+    cache_key = hashlib.md5(
+        f"{endpoint}:{json.dumps(params or {}, sort_keys=True)}".encode()
+    ).hexdigest()
 
     with _cache_lock:
         if cache_key in _api_cache:
@@ -103,14 +105,15 @@ def call_quran_api(endpoint, params=None):
             "x-client-id": QF_CLIENT_ID,
         }
 
-    response = requests.get(url, headers=headers, params=params, timeout=15)
+    response = requests.get(url, headers=headers, params=params, timeout=20)
 
     # Retry on 401
     if response.status_code == 401 and not USE_LEGACY:
+        print("   ⚠️  401 — re-requesting token...")
         _token_cache["token"] = None
         token = get_access_token()
         headers["x-auth-token"] = token
-        response = requests.get(url, headers=headers, params=params, timeout=15)
+        response = requests.get(url, headers=headers, params=params, timeout=20)
 
     response.raise_for_status()
     data = response.json()
@@ -122,136 +125,40 @@ def call_quran_api(endpoint, params=None):
 
 
 # =============================================================================
+# Shared verse params builder
+# =============================================================================
+def _verse_params():
+    p = {
+        "language": request.args.get("language", "id"),
+        "words": request.args.get("words", "true"),
+        "translations": request.args.get("translations", "33"),
+        "fields": request.args.get("fields", "text_uthmani,text_uthmani_tajweed,text_indopak"),
+        "word_fields": request.args.get(
+            "word_fields",
+            "text_uthmani,text_indopak,code_v1,code_v2,v1_page,v2_page,line_number",
+        ),
+        "translation_fields": request.args.get("translation_fields", "resource_name"),
+        "per_page": request.args.get("per_page", "50"),
+        "page": request.args.get("page", "1"),
+    }
+    tafsirs = request.args.get("tafsirs", "")
+    if tafsirs:
+        p["tafsirs"] = tafsirs
+    return p
+
+
+# =============================================================================
+# Error Handler
+# =============================================================================
+@app.errorhandler(Exception)
+def handle_error(e):
+    code = getattr(e, "code", 500) if hasattr(e, "code") else 500
+    return jsonify({"error": str(e), "status": code}), code if isinstance(code, int) else 500
+
+
+# =============================================================================
 # API Routes
 # =============================================================================
-
-@app.route("/api/chapters", methods=["GET"])
-def get_chapters():
-    """Get all 114 surahs"""
-    language = request.args.get("language", "id")
-    data = call_quran_api("/api/v4/chapters", {"language": language})
-    return jsonify(data)
-
-
-@app.route("/api/chapters/<int:chapter_id>", methods=["GET"])
-def get_chapter(chapter_id):
-    """Get single chapter info"""
-    language = request.args.get("language", "id")
-    data = call_quran_api(f"/api/v4/chapters/{chapter_id}", {"language": language})
-    return jsonify(data)
-
-
-@app.route("/api/verses/by_chapter/<int:chapter_id>", methods=["GET"])
-def get_verses_by_chapter(chapter_id):
-    """Get verses by chapter with translations, words, tafsir"""
-    params = {
-        "language": request.args.get("language", "id"),
-        "words": request.args.get("words", "true"),
-        "translations": request.args.get("translations", "33"),  # 33 = Indonesian translation
-        "fields": request.args.get("fields", "text_uthmani,text_uthmani_tajweed,text_indopak"),
-        "word_fields": request.args.get("word_fields", "text_uthmani,text_indopak,code_v1,code_v2,v1_page,v2_page,line_number"),
-        "per_page": request.args.get("per_page", "50"),
-        "page": request.args.get("page", "1"),
-    }
-    tafsirs = request.args.get("tafsirs", "")
-    if tafsirs:
-        params["tafsirs"] = tafsirs
-    data = call_quran_api(f"/api/v4/verses/by_chapter/{chapter_id}", params)
-    return jsonify(data)
-
-
-@app.route("/api/verses/by_page/<int:page_number>", methods=["GET"])
-def get_verses_by_page(page_number):
-    """Get verses by mushaf page number (1-604)"""
-    params = {
-        "language": request.args.get("language", "id"),
-        "words": request.args.get("words", "true"),
-        "translations": request.args.get("translations", "33"),
-        "fields": request.args.get("fields", "text_uthmani,text_uthmani_tajweed,text_indopak"),
-        "word_fields": request.args.get("word_fields", "text_uthmani,text_indopak,code_v1,code_v2,v1_page,v2_page,line_number"),
-        "per_page": "50",
-    }
-    tafsirs = request.args.get("tafsirs", "")
-    if tafsirs:
-        params["tafsirs"] = tafsirs
-    data = call_quran_api(f"/api/v4/verses/by_page/{page_number}", params)
-    return jsonify(data)
-
-
-@app.route("/api/verses/by_juz/<int:juz_number>", methods=["GET"])
-def get_verses_by_juz(juz_number):
-    """Get verses by juz number"""
-    params = {
-        "language": request.args.get("language", "id"),
-        "words": request.args.get("words", "true"),
-        "translations": request.args.get("translations", "33"),
-        "fields": request.args.get("fields", "text_uthmani,text_uthmani_tajweed"),
-        "per_page": request.args.get("per_page", "50"),
-        "page": request.args.get("page", "1"),
-    }
-    data = call_quran_api(f"/api/v4/verses/by_juz/{juz_number}", params)
-    return jsonify(data)
-
-
-@app.route("/api/quran/verses/uthmani_tajweed", methods=["GET"])
-def get_uthmani_tajweed():
-    """Get Uthmani tajweed text"""
-    params = {
-        "chapter_number": request.args.get("chapter_number", "1"),
-    }
-    data = call_quran_api("/api/v4/quran/verses/uthmani_tajweed", params)
-    return jsonify(data)
-
-
-@app.route("/api/tafsirs/<int:tafsir_id>/by_ayah/<path:verse_key>", methods=["GET"])
-def get_tafsir(tafsir_id, verse_key):
-    """Get tafsir for a specific verse"""
-    data = call_quran_api(f"/api/v4/tafsirs/{tafsir_id}/by_ayah/{verse_key}")
-    return jsonify(data)
-
-
-@app.route("/api/resources/translations", methods=["GET"])
-def get_translations():
-    """Get available translations"""
-    language = request.args.get("language", "id")
-    data = call_quran_api("/api/v4/resources/translations", {"language": language})
-    return jsonify(data)
-
-
-@app.route("/api/resources/tafsirs", methods=["GET"])
-def get_tafsirs():
-    """Get available tafsirs"""
-    language = request.args.get("language", "id")
-    data = call_quran_api("/api/v4/resources/tafsirs", {"language": language})
-    return jsonify(data)
-
-
-@app.route("/api/resources/languages", methods=["GET"])
-def get_languages():
-    """Get available languages"""
-    data = call_quran_api("/api/v4/resources/languages")
-    return jsonify(data)
-
-
-@app.route("/api/juzs", methods=["GET"])
-def get_juzs():
-    """Get all juzs"""
-    data = call_quran_api("/api/v4/juzs")
-    return jsonify(data)
-
-
-@app.route("/api/search", methods=["GET"])
-def search():
-    """Search the Quran"""
-    params = {
-        "q": request.args.get("q", ""),
-        "size": request.args.get("size", "20"),
-        "page": request.args.get("page", "0"),
-        "language": request.args.get("language", "id"),
-    }
-    data = call_quran_api("/api/v4/search", params)
-    return jsonify(data)
-
 
 @app.route("/api/health", methods=["GET"])
 def health():
@@ -262,11 +169,99 @@ def health():
     })
 
 
+@app.route("/api/chapters", methods=["GET"])
+def get_chapters():
+    language = request.args.get("language", "id")
+    return jsonify(call_quran_api("/api/v4/chapters", {"language": language}))
+
+
+@app.route("/api/chapters/<int:chapter_id>", methods=["GET"])
+def get_chapter(chapter_id):
+    language = request.args.get("language", "id")
+    return jsonify(call_quran_api(f"/api/v4/chapters/{chapter_id}", {"language": language}))
+
+
+@app.route("/api/chapters/<int:chapter_id>/info", methods=["GET"])
+def get_chapter_info(chapter_id):
+    language = request.args.get("language", "id")
+    return jsonify(call_quran_api(f"/api/v4/chapters/{chapter_id}/info", {"language": language}))
+
+
+@app.route("/api/verses/by_chapter/<int:chapter_id>", methods=["GET"])
+def get_verses_by_chapter(chapter_id):
+    return jsonify(call_quran_api(f"/api/v4/verses/by_chapter/{chapter_id}", _verse_params()))
+
+
+@app.route("/api/verses/by_page/<int:page_number>", methods=["GET"])
+def get_verses_by_page(page_number):
+    return jsonify(call_quran_api(f"/api/v4/verses/by_page/{page_number}", _verse_params()))
+
+
+@app.route("/api/verses/by_juz/<int:juz_number>", methods=["GET"])
+def get_verses_by_juz(juz_number):
+    return jsonify(call_quran_api(f"/api/v4/verses/by_juz/{juz_number}", _verse_params()))
+
+
+@app.route("/api/verses/by_key/<path:verse_key>", methods=["GET"])
+def get_verse_by_key(verse_key):
+    return jsonify(call_quran_api(f"/api/v4/verses/by_key/{verse_key}", _verse_params()))
+
+
+@app.route("/api/quran/verses/uthmani_tajweed", methods=["GET"])
+def get_uthmani_tajweed():
+    params = {"chapter_number": request.args.get("chapter_number", "1")}
+    return jsonify(call_quran_api("/api/v4/quran/verses/uthmani_tajweed", params))
+
+
+@app.route("/api/tafsirs/<int:tafsir_id>/by_ayah/<path:verse_key>", methods=["GET"])
+def get_tafsir(tafsir_id, verse_key):
+    return jsonify(call_quran_api(f"/api/v4/tafsirs/{tafsir_id}/by_ayah/{verse_key}"))
+
+
+@app.route("/api/resources/translations", methods=["GET"])
+def get_translations():
+    language = request.args.get("language", "id")
+    return jsonify(call_quran_api("/api/v4/resources/translations", {"language": language}))
+
+
+@app.route("/api/resources/tafsirs", methods=["GET"])
+def get_tafsirs():
+    language = request.args.get("language", "id")
+    return jsonify(call_quran_api("/api/v4/resources/tafsirs", {"language": language}))
+
+
+@app.route("/api/resources/languages", methods=["GET"])
+def get_languages():
+    return jsonify(call_quran_api("/api/v4/resources/languages"))
+
+
+@app.route("/api/juzs", methods=["GET"])
+def get_juzs():
+    return jsonify(call_quran_api("/api/v4/juzs"))
+
+
+@app.route("/api/search", methods=["GET"])
+def search():
+    params = {
+        "q": request.args.get("q", ""),
+        "size": request.args.get("size", "20"),
+        "page": request.args.get("page", "0"),
+        "language": request.args.get("language", "id"),
+    }
+    return jsonify(call_quran_api("/api/v4/search", params))
+
+
 # =============================================================================
 # Run
 # =============================================================================
 if __name__ == "__main__":
-    print(f"🕌 Quran Hub Backend Starting...")
-    print(f"   Mode: {'Legacy API' if USE_LEGACY else 'OAuth2'}")
-    print(f"   Env: {QF_ENV}")
-    app.run(debug=True, port=5000)
+    print()
+    print("  ┌──────────────────────────────────────────────┐")
+    print("  │  🕌  Quran Hub Backend                        │")
+    print(f"  │  Mode : {'Legacy API' if USE_LEGACY else 'OAuth2 (' + QF_ENV + ')':35s} │")
+    if not USE_LEGACY:
+        print(f"  │  API  : {ENV_CONFIG[QF_ENV]['api_base_url']:35s} │")
+    print("  │  Port : 5000                                  │")
+    print("  └──────────────────────────────────────────────┘")
+    print()
+    app.run(debug=True, host="0.0.0.0", port=5000)

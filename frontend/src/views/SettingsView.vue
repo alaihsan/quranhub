@@ -52,6 +52,21 @@ const tafsirs = [
 
         <div class="setting-row">
           <div class="setting-info">
+            <span class="setting-label">Mode Baca Default</span>
+            <span class="setting-desc">Pilih tampilan saat membuka surah</span>
+          </div>
+          <div class="toggle-group">
+            <button :class="['toggle-btn', { active: form.readingMode === 'normal' }]" @click="form.readingMode = 'normal'">
+              Per Ayat
+            </button>
+            <button :class="['toggle-btn', { active: form.readingMode === 'mushaf' }]" @click="form.readingMode = 'mushaf'">
+              Mushaf
+            </button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
             <span class="setting-label">Ukuran Font Arab</span>
             <span class="setting-desc">Atur ukuran teks Al-Quran</span>
           </div>
